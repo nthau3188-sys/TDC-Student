@@ -62,20 +62,129 @@ app.post("/api/login", async (req, res) => {
   } catch (e) { res.status(500).json({ error: "Không kết nối được cổng trường: " + e.message }); }
 });
 
+// Đọc bảng Hộp thư: tìm bảng có cột "Tiêu đề" và "Người gửi"
+function readInbox($) {
+  const rows = [];
+  $("table").each((_, tb) => {
+    const heads = $(tb).find("tr").first().children("td,th").map((_, c) => $(c).text().trim()).get();
+    if (!heads.some(h => h.includes("Tiêu đề")) || !heads.some(h => h.includes("Người gửi"))) return;
+    $(tb).find("tr").slice(1).each((_, tr) => {
+      const td = $(tr).children("td");
+      const t = td.eq(0).text().replace(/\s+/g, " ").trim();
+      if (t && td.length >= 3) rows.push({ t, f: td.eq(1).text().trim(), d: td.eq(2).text().trim() });
+    });
+  });
+  return rows;
+}
+
+// Bấm "Thông tin cá nhân" (lnkInfo) rồi đọc các dòng nhãn | giá trị
+async function readPersonal(jar, html) {
+  const $ = cheerio.load(html);
+  const p = hidden($);
+  p.set("__EVENTTARGET", "ctl00$ContentPlaceHolder1$ctl00$ctl00$lnkInfo"); p.set("__EVENTARGUMENT", "");
+  const pb = await fetch(BASE + "/", { method: "POST", body: p.toString(), redirect: "manual",
+    headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", Cookie: cookieHeader(jar) }, signal: AbortSignal.timeout(25000) });
+  takeCookies(jar, pb);
+  const { html: h2 } = await get(jar, BASE + "/");
+  const $2 = cheerio.load(h2);
+  const items = [];
+  $2("table tr").each((_, tr) => {
+    const td = $2(tr).children("td");
+    if (td.length === 2) {
+      const t = td.eq(0).text().replace(/\s+/g, " ").trim().replace(/:$/, "");
+      const n = td.eq(1).text().replace(/\s+/g, " ").trim();
+      if (t && n && t.length < 60) items.push({ t, n });
+    }
+  });
+  return items;
+}
+
+// Bấm "Thông tin học phí" (lnkAccount) rồi đọc các dòng của bảng học phí
+async function readFee(jar, html) {
+  const $ = cheerio.load(html);
+  const p = hidden($);
+  p.set("__EVENTTARGET", "ctl00$ContentPlaceHolder1$ctl00$ctl00$lnkAccount"); p.set("__EVENTARGUMENT", "");
+  const pb = await fetch(BASE + "/", { method: "POST", body: p.toString(), redirect: "manual",
+    headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", Cookie: cookieHeader(jar) }, signal: AbortSignal.timeout(25000) });
+  takeCookies(jar, pb);
+  const { html: h2 } = await get(jar, BASE + "/");
+  const $2 = cheerio.load(h2);
+  const items = [];
+  $2("table tr").each((_, tr) => {
+    const cells = $2(tr).children("td").map((_, c) => $2(c).text().replace(/\s+/g, " ").trim()).get().filter(Boolean);
+    if (cells.length >= 2 && cells.join(" ").length < 300) items.push({ t: cells.join(" · ") });
+  });
+  return items;
+}
+
+// Bấm một mục bằng postback rồi đọc các dòng của bảng (dùng cho mục đơn giản)
+async function readByPostback(jar, html, target) {
+  const $ = cheerio.load(html);
+  const p = hidden($);
+  p.set("__EVENTTARGET", target); p.set("__EVENTARGUMENT", "");
+  const pb = await fetch(BASE + "/", { method: "POST", body: p.toString(), redirect: "manual",
+    headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", Cookie: cookieHeader(jar) }, signal: AbortSignal.timeout(25000) });
+  takeCookies(jar, pb);
+  const { html: h2 } = await get(jar, BASE + "/");
+  const $2 = cheerio.load(h2);
+  const items = [];
+  $2("table tr").each((_, tr) => {
+    const cells = $2(tr).children("td").map((_, c) => $2(c).text().replace(/\s+/g, " ").trim()).get().filter(Boolean);
+    if (cells.length >= 2 && cells.join(" ").length < 300) items.push({ t: cells.join(" · ") });
+  });
+  return items;
+}
+
 app.get("/api/sync", async (req, res) => {
   const s = S.get((req.headers.authorization || "").slice(7));
   if (!s) return res.status(401).json({ error: "Phiên hết hạn, hãy đăng nhập lại" });
   try {
     const { html } = await get(s.jar, BASE + "/");
-    const $ = cheerio.load(html);
-    // Hiện chỉ lấy thông báo mới trên trang chủ sau đăng nhập (tiêu đề và thời điểm)
-    const inbox = [];
-    $("table tr").each((_, tr) => {
-      const td = $(tr).children("td");
-      const t = td.eq(0).text().trim();
-      if (t && td.length >= 3) inbox.push({ t, f: td.eq(1).text().trim(), d: td.eq(2).text().trim() });
-    });
-    res.json({ inbox });
+    let inbox = readInbox(cheerio.load(html));
+    if (!inbox.length) {
+      // Bấm "Hộp thư" (lnkHome) rồi đọc lại
+      const $ = cheerio.load(html);
+      const p = hidden($);
+      p.set("__EVENTTARGET", "ctl00$ContentPlaceHolder1$ctl00$ctl00$lnkHome"); p.set("__EVENTARGUMENT", "");
+      const pb = await fetch(BASE + "/", { method: "POST", body: p.toString(), redirect: "manual",
+        headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", Cookie: cookieHeader(s.jar) }, signal: AbortSignal.timeout(25000) });
+      takeCookies(s.jar, pb);
+      const again = await get(s.jar, BASE + "/");
+      inbox = readInbox(cheerio.load(again.html));
+    }
+    let me = [];
+    try { me = await readPersonal(s.jar, html); } catch (e) {}
+    let fee = [];
+    try { fee = await readFee(s.jar, html); } catch (e) {}
+    let debt = [];
+    try { debt = await readByPostback(s.jar, html, "ctl00$ContentPlaceHolder1$ctl00$ctl00$lnkNosach"); } catch (e) {}
+    let ctdt = [];
+    try { ctdt = await readByPostback(s.jar, html, "ctl00$ContentPlaceHolder1$ctl00$ctl00$lnkStudyProgram"); } catch (e) {}
+    let dkhp = [];
+    try { dkhp = await readByPostback(s.jar, html, "ctl00$ContentPlaceHolder1$ctl00$ctl00$lnkDangKy"); } catch (e) {}
+    let tkb = [];
+    try { tkb = await readByPostback(s.jar, html, "ctl00$ContentPlaceHolder1$ctl00$ctl00$lnkThoiKhoaBieu"); } catch (e) {}
+    let diem = [];
+    try { diem = await readByPostback(s.jar, html, "ctl00$ContentPlaceHolder1$ctl00$ctl00$lnkDiem"); } catch (e) {}
+    let forum = [];
+    try { forum = await readByPostback(s.jar, html, "ctl00$ContentPlaceHolder1$ctl00$ctl00$lnkYkien"); } catch (e) {}
+    // Các mục còn lại: [khóa trong app, tên lệnh postback]
+    const EXTRA = [
+      ["cvht", "lbtnSVKhaoSatCVHT"],
+      ["rule", "lnkQuychehocvu"],
+      ["vp", "lnkVipham"],
+      ["ck", "lnkSinhVieCamKet"],
+      ["drl", "lnkDiemRenLuyen"],
+      ["ev", "lnkThamGiaPhongTrao"],
+      ["mon", "lnkGhidanhtuchon"],
+      ["tn", "lnkDangkyxettotnghiep"],
+    ];
+    const extra = {};
+    for (const [key, name] of EXTRA) {
+      try { extra[key] = await readByPostback(s.jar, html, "ctl00$ContentPlaceHolder1$ctl00$ctl00$" + name); }
+      catch (e) { extra[key] = []; }
+    }
+    res.json({ inbox, me, fee, debt, ctdt, dkhp, tkb, diem, forum, ...extra });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
