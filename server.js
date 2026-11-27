@@ -88,4 +88,25 @@ app.get("/api/test", async (req, res) => {
   res.json(out);
 });
 
+// Quét các trang có thể chứa form đăng nhập sinh viên (không gửi mật khẩu)
+app.get("/api/forms", async (req, res) => {
+  const paths = ["/", "/Default.aspx", "/Login.aspx", "/login.aspx", "/Index.aspx", "/default.aspx", "/Default1.aspx", "/SinhVien/Login.aspx"];
+  const out = [];
+  for (const p of paths) {
+    const item = { path: p };
+    try {
+      const r = await fetch(BASE + p, { redirect: "manual", headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(15000) });
+      item.status = r.status;
+      const $ = cheerio.load(await r.text());
+      item.hasLoginText = $("body").text().includes("Tên đăng nhập");
+      item.forms = $("form").map((_, f) => ({
+        action: $(f).attr("action") || "",
+        inputs: $(f).find("input,select,textarea").map((_, e) => (($(e).attr("name") || "") + "|" + ($(e).attr("type") || ""))).get()
+      })).get();
+    } catch (e) { item.error = e.message; }
+    out.push(item);
+  }
+  res.json(out);
+});
+
 app.listen(process.env.PORT || 3000, () => console.log("TDC Mobile đang chạy"));
