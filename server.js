@@ -12,7 +12,7 @@ const MENU = new Set(["trang của bạn", "hộp thư", "thông tin cá nhân",
   "sinh viên vi phạm", "sinh viên cam kết", "điểm rèn luyện", "tham gia sự kiện", "ghi danh môn tự chọn", "đăng ký xét tốt nghiệp",
   "hướng dẫn sử dụng", "thoát", "thanh công cụ", "trang chủ", "văn bản", "hướng dẫn", "đóng học phí", "đăng thoát"]);
 const CHROME = /TRƯỜNG CAO ĐẲNG|Địa chỉ:|Điện thoại:|Copyright|Powered and|Lượt truy cập|Đang online|Tra cứu Văn bằng/i;
-const clean = s => String(s || "").replace(/\s+/g, " ").trim();
+const clean = s => String(s || "").normalize("NFC").replace(/\s+/g, " ").trim();
 const isChrome = c => MENU.has(clean(c).toLowerCase()) || CHROME.test(c);
 
 const S = new Map();
@@ -50,6 +50,21 @@ function cell($, td) {
   c.find("input[type=checkbox],input[type=radio]").each((_, e) => { $(e).replaceWith($("<span>").text($(e).attr("checked") !== undefined ? " ✓ " : " ")); });
   c.find("input[type=hidden],input[type=submit],input[type=button],input[type=image],button").remove();
   return clean(c.text());
+}
+function findName(pairs) {
+  const L = pairs.map(([l, v]) => [clean(l).toLowerCase(), v]);
+  const f = L.find(([l]) => /(^|\s)(họ\s*(và\s*)?tên|tên sinh viên|họ tên sv)/.test(l)); if (f) return f[1];
+  const h = L.find(([l]) => /^họ(\s*(lót|đệm|và tên đệm))?$/.test(l)), t = L.find(([l]) => l === "tên");
+  return h && t ? clean(h[1] + " " + t[1]) : (t ? t[1] : "");
+}
+// Tìm trang nhúng (iframe, window.open) nằm trên cùng cổng trường
+function embedded(html) {
+  const $ = cheerio.load(html), set = new Set();
+  const add = u => { try { if (!u || /^javascript:|__doPostBack/i.test(u)) return; const a = new URL(u, BASE + "/");
+    if (a.host === new URL(BASE).host && !(a.pathname === "/" && !a.search)) set.add(a.href); } catch (e) {} };
+  $("iframe,frame").each((_, f) => add($(f).attr("src") || ""));
+  for (const m of html.matchAll(/window\.open\(\s*['"]([^'"]+)['"]/g)) add(m[1]);
+  return [...set].slice(0, 3);
 }
 function dropPagers($) {
   $("table").each((_, t) => { if (!$(t).find("table").length && /^[\d\s.…]+$/.test(clean($(t).text())) && $(t).find("a").length) $(t).remove(); });
@@ -94,8 +109,11 @@ function extract($) {
       if (body.length) tables.push({ h, r: body });
     }
   });
+  $("br").replaceWith("\n");
+  $("td,th").each((_, e) => { $(e).append(" | "); });
+  $("tr,div,p,li,h1,h2,h3,h4,h5,h6,table,ul,ol").each((_, e) => { $(e).append("\n"); });
   const lines = []; let last = "";
-  for (const raw of $("body").text().split(/\n+/)) { const l = clean(raw); if (!l || l === last || isChrome(l)) continue; lines.push(l); last = l; }
+  for (const raw of $("body").text().split(/\n+/)) { const l = clean(raw).replace(/(\s*\|)+$/, "").replace(/^\|\s*/, ""); if (!l || l === last || isChrome(l)) continue; lines.push(l); last = l; }
   return { pairs: pairs.slice(0, 120), tables: tables.slice(0, 8), text: lines.join("\n").slice(0, 6000) };
 }
 
@@ -133,13 +151,17 @@ app.get("/api/page", async (q, res) => {
     if (!html.includes(name)) html = await postback(s.jar, html, PFX + "lnkHome");
     if (!html.includes(name)) return res.status(502).json({ error: "Không tìm thấy mục trên trang trường" });
     html = await postback(s.jar, html, PFX + name);
-    const $ = cheerio.load(html);
-    if (m === "inbox") return res.json({ inbox: readInbox($) });
-    const out = extract($);
-    if (m === "me") { const f = out.pairs.find(([l]) => /họ\s*(và\s*)?tên|tên sinh viên/i.test(l)); if (f) out.name = f[1]; }
+    if (m === "inbox") return res.json({ inbox: readInbox(cheerio.load(html)) });
+    const urls = embedded(html), out = extract(cheerio.load(html)), dbg = { len: html.length, urls };
+    for (const u of urls) {
+      try { const o2 = extract(cheerio.load(await req(s.jar, u))); out.pairs.push(...o2.pairs); out.tables.push(...o2.tables);
+        out.text = (out.text + "\n" + o2.text).trim().slice(0, 8000); } catch (e) { dbg.err = e.message; }
+    }
+    out.pairs = out.pairs.slice(0, 150); out.tables = out.tables.slice(0, 10); out.dbg = dbg;
+    if (m === "me") { const n = findName(out.pairs); if (n) out.name = n; }
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 if (require.main === module) app.listen(process.env.PORT || 3000, () => console.log("TDC Student đang chạy"));
-else module.exports = { extract, readInbox };
+else module.exports = { extract, readInbox, findName, embedded };

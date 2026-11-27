@@ -75,10 +75,23 @@ main{padding-top:14px}
 .stamp{text-align:center;color:var(--mute);font-size:12px;margin:6px 0 14px}
 .btn{border-radius:12px}
 nav{box-shadow:0 -4px 18px rgba(20,32,46,.06)}
+
+header{gap:12px}
+.av{width:46px;height:46px;flex:none;font-size:18px}
+#back{padding:6px 11px;font-size:20px;line-height:1}
+.who small{display:block;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;opacity:.85}
+.who h1{font-size:18px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv{display:block;padding:10px 0}
+.kv span{display:block;flex:none;font-size:12px}
+.kv b{display:block;text-align:left;font-size:15px;margin-top:2px}
+.prof{display:flex;align-items:center;gap:14px;background:linear-gradient(135deg,#0a4f99,#1c8be6);color:#fff;border-radius:20px;padding:16px;margin-bottom:10px;box-shadow:0 6px 18px rgba(10,79,153,.25)}
+.pav{width:54px;height:54px;border-radius:50%;background:#fff;color:#0a4f99;display:grid;place-items:center;font-weight:700;font-size:22px;flex:none}
+.prof b{display:block;font-size:17px}
+.prof span{font-size:13px;opacity:.9}
 </style>
 </head>
 <body>
-<header><button id="back" hidden aria-label="Quay lại">‹</button><div class="who"><h1 id="ttl">TDC Student</h1><p id="sub"></p><p id="sub2" hidden></p></div><button id="theme" aria-label="Đổi giao diện sáng tối">◐</button><button id="acc" class="av" aria-label="Tài khoản">SV</button></header>
+<header><button id="back" hidden aria-label="Quay lại">‹</button><button id="acc" class="av" aria-label="Tài khoản">SV</button><div class="who"><small id="brand">TDC Student</small><h1 id="ttl">Sinh viên</h1><p id="sub"></p></div><button id="theme" aria-label="Đổi giao diện sáng tối">◐</button></header>
 <main id="app"></main>
 <div id="sh" hidden><div class="sb" id="shc"></div></div>
 <nav id="nav"></nav>
@@ -133,15 +146,24 @@ function home(){
  $("#ttl").textContent="TDC Student";$("#back").hidden=true;
  const n=(D.inbox||[]).filter(x=>x.u).length;
  return `<div class="note">${P.token?`Đã đăng nhập · đồng bộ lần cuối: ${P.last?new Date(P.last).toLocaleString("vi-VN"):"chưa có"}`:"Chưa đăng nhập cổng trường."} <button class="btn alt" style="padding:6px 12px;margin-left:6px" data-acc="1">${P.token?"Tài khoản":"Đăng nhập"}</button></div>
- <div class="grid">${M.map(m=>`<button class="tile" style="--h:${(M.indexOf(m)*47+200)%360}" data-go="${m.k}"><span>${m.i}</span>${m.n}<i>${m.k=="inbox"&&n?n+" chưa đọc":m.link?"Mở web":cnt(m.k)+" mục"}</i></button>`).join("")}</div>`}
+ <div class="grid">${M.map(m=>`<button class="tile" style="--h:${(M.indexOf(m)*47+200)%360}" data-go="${m.k}"><span>${m.i}</span>${m.n}<i>${m.k=="inbox"&&n?n+" chưa đọc":m.link?"Mở web":stat(m.k)}</i></button>`).join("")}</div>`}
 
+function nameFrom(pairs){const L=(pairs||[]).map(([l,v])=>[String(l).normalize("NFC").toLowerCase().trim(),v]);
+ const f=L.find(([l])=>/(^|\s)(họ\s*(và\s*)?tên|tên sinh viên|họ tên sv)/.test(l));if(f)return f[1];
+ const h=L.find(([l])=>/^họ(\s*(lót|đệm|và tên đệm))?$/.test(l)),t=L.find(([l])=>l=="tên");
+ return h&&t?(h[1]+" "+t[1]).trim():(t?t[1]:"")}
+function autoName(){if(P.name&&P.name!=P.mssv)return;const s=(D.pages||{}).me;if(!s||!s.pairs)return;const n=nameFrom(s.pairs);if(n){P.name=n;PS()}}
 function cnt(k){const s=(D.pages||{})[k];if(!s||s.err)return(D[k]||[]).length;return(s.pairs||[]).length+(s.tables||[]).reduce((a,t)=>a+t.r.length,0)}
+function stat(k){const s=(D.pages||{})[k];if(!s)return(D[k]||[]).length?D[k].length+" mục":"Chưa đồng bộ";
+ if(s.err)return"Lỗi · chạm để xem";const n=cnt(k);return n?n+" mục":(s.text?"Có nội dung":"Trống")}
 function snap(k){const s=(D.pages||{})[k];if(!s)return"";
  if(s.err)return`<div class="note">Mục này chưa đồng bộ được: ${esc(s.err)}</div>`;
  const kv=(s.pairs||[]).map(([l,v])=>`<div class="kv"><span>${esc(l)}</span><b>${esc(v)}</b></div>`).join("");
  const tb=(s.tables||[]).map(t=>t.r.map(r=>`<div class="rw">${r.map((c,i)=>c?`<div class="cl">${t.h[i]?`<span>${esc(t.h[i])}</span>`:""}${esc(c)}</div>`:"").join("")}</div>`).join("")).join("");
+ const prof=k=="me"&&P.name?`<div class="prof"><div class="pav">${esc(P.name.trim().split(" ").pop()[0].toUpperCase())}</div><div><b>${esc(P.name)}</b><span>MSSV ${esc(P.mssv)}</span></div></div>`:"";
  const tx=s.text?(kv||tb?`<details class="f"><summary>Xem nội dung trang gốc</summary><div class="b">${esc(s.text)}</div></details>`:`<div class="card"><div class="b">${esc(s.text)}</div></div>`):"";
- return(kv?`<div class="card">${kv}</div>`:"")+tb+tx+`<div class="stamp">Đồng bộ lúc ${new Date(s.t).toLocaleString("vi-VN")}</div>`}
+ const em=!kv&&!tb&&!s.text?`<div class="note">Trang trường không trả về nội dung cho mục này.${s.dbg?` (Trang ${s.dbg.len||0} ký tự, ${(s.dbg.urls||[]).length} trang nhúng)`:""}</div>`:"";
+ return prof+(kv?`<div class="card">${kv}</div>`:"")+tb+tx+em+`<div class="stamp">Đồng bộ lúc ${new Date(s.t).toLocaleString("vi-VN")}</div>`}
 function line(m,x){
  return m.f.filter(f=>!["t","b","p"].includes(f[0])&&x[f[0]]!==undefined&&x[f[0]]!=="").map(f=>f[2]=="num"&&f[0]=="a"?money(x[f[0]]):esc(x[f[0]])).join(" · ")}
 
@@ -178,8 +200,11 @@ function render(){
  nav();let h;
  if(cur){const m=mod(cur);h=list(m)}else if(tab=="bk")h=backup();else h=home();
  $("#app").innerHTML=h;
- $("#sub").textContent=P.mssv?"MSSV "+P.mssv:"Chưa đăng nhập";
- const nm=P.name&&P.name!=P.mssv?P.name:"";$("#sub2").textContent=nm;$("#sub2").hidden=!nm;
+ autoName();
+ const nm=P.name&&P.name!=P.mssv?P.name:"",hm=!cur&&tab=="home";
+ $("#brand").hidden=!hm;
+ if(hm){$("#ttl").textContent=nm||"Sinh viên";$("#sub").textContent=P.mssv?"MSSV "+P.mssv:"Chưa đăng nhập"}
+ else $("#sub").textContent=(nm?nm+" · ":"")+(P.mssv?"MSSV "+P.mssv:"");
  $("#acc").textContent=(nm||"SV").trim().split(" ").pop()[0].toUpperCase()}
 
 function go(k){q="";editIdx=-1;scrollTo(0,0);
@@ -227,7 +252,7 @@ async function sync(cb){D.pages=D.pages||{};
   try{const r=await api("/api/page?m="+k);
    if(k=="inbox"){const old=D.inbox||[],first=!D.inboxV2;
     D.inbox=[...(r.inbox||[]).map(x=>({...x,sy:1,u:(old.find(y=>y.sy&&y.t==x.t&&y.d==x.d)||{u:first?0:1}).u})),...old.filter(x=>!x.sy)];D.inboxV2=1}
-   else{D.pages[k]={t:Date.now(),pairs:r.pairs||[],tables:r.tables||[],text:r.text||""};if(k=="me"&&r.name){P.name=r.name;PS()}}
+   else{D.pages[k]={t:Date.now(),pairs:r.pairs||[],tables:r.tables||[],text:r.text||"",dbg:r.dbg};if(k=="me"){const n=r.name||nameFrom(r.pairs);if(n){P.name=n;PS()}}}
   }catch(e){if(/hết hạn/.test(e.message))throw e;if(k!="inbox")D.pages[k]={t:Date.now(),err:e.message}}
   save()}
  P.last=Date.now();PS();save()}
