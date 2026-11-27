@@ -23,24 +23,61 @@ app.get("/", (q, r) => r.sendFile(__dirname + "/index.html"));
 
 const ck = jar => Object.entries(jar).map(([k, v]) => k + "=" + v).join("; ");
 function take(jar, r) { for (const c of r.headers.getSetCookie()) { const [kv] = c.split(";"), j = kv.indexOf("="); jar[kv.slice(0, j)] = kv.slice(j + 1); } }
-// Gửi yêu cầu và tự theo các chuyển hướng (POST rồi GET), giữ cookie phiên
-async function req(jar, url, opt = {}) {
+// Gửi yêu cầu, tự theo chuyển hướng, giữ cookie. Trả về { html, url } của trang cuối
+async function fetchPage(jar, url, opt = {}) {
   for (let n = 0; n < 6; n++) {
-    const r = await fetch(url, { ...opt, redirect: "manual", signal: AbortSignal.timeout(25000),
+    const r = await fetch(url, { ...opt, redirect: "manual", signal: AbortSignal.timeout(30000),
       headers: { "User-Agent": UA, Cookie: ck(jar), ...(opt.body ? { "Content-Type": "application/x-www-form-urlencoded" } : {}) } });
     take(jar, r);
     const loc = r.headers.get("location");
     if (r.status >= 300 && r.status < 400 && loc) { url = new URL(loc, url).href; opt = {}; continue; }
-    return r.text();
+    return { html: await r.text(), url };
   }
   throw new Error("Quá nhiều chuyển hướng");
 }
+const req = async (...a) => (await fetchPage(...a)).html;
 function hidden($) { const p = new URLSearchParams(); $("input[type=hidden]").each((_, e) => p.set($(e).attr("name"), $(e).attr("value") || "")); return p; }
 function postback(jar, html, target) {
   const p = hidden(cheerio.load(html)); p.set("__EVENTTARGET", target); p.set("__EVENTARGUMENT", "");
   return req(jar, BASE + "/", { method: "POST", body: p.toString() });
 }
 
+function brief(html) {
+  const $ = cheerio.load(html), title = clean($("title").text());
+  $("script,style").remove();
+  const links = [...new Set([...html.matchAll(/__doPostBack\('([^']+)'/g)].map(m => m[1].split("$").pop()))].slice(0, 8);
+  return "[" + title + "] " + clean($("body").text()).slice(0, 150) + (links.length ? " Liên kết: " + links.join(", ") : "");
+}
+function homeTargets(html) {
+  const $ = cheerio.load(html), out = [];
+  $("a").each((_, a) => {
+    const h = $(a).attr("href") || "", t = clean($(a).text()), m = h.match(/__doPostBack\('([^']+)'/);
+    if (m && (/lnkHome$/.test(m[1]) || /^trang\s*(của bạn|chủ)$/i.test(t))) out.push({ pb: m[1] });
+    else if (!m && /^trang\s*(chủ|của bạn)$/i.test(t) && h && !/^javascript:|^#/i.test(h)) out.push({ url: h });
+  });
+  return out.slice(0, 4);
+}
+// Gửi postback đúng địa chỉ form của trang hiện tại
+function post(jar, page, target) {
+  const $ = cheerio.load(page.html), p = hidden($); p.set("__EVENTTARGET", target); p.set("__EVENTARGUMENT", "");
+  return fetchPage(jar, new URL($("form").first().attr("action") || "", page.url).href, { method: "POST", body: p.toString() });
+}
+async function openModule(jar, name) {
+  let page = await fetchPage(jar, BASE + "/");
+  if (cheerio.load(page.html)("input[name$='txtUserName']").length) throw Object.assign(new Error("Phiên hết hạn, hãy đăng nhập lại"), { code: 401 });
+  const tried = [];
+  if (!page.html.includes(name)) {
+    for (const t of homeTargets(page.html)) {
+      tried.push(t.pb || t.url);
+      try { page = t.pb ? await post(jar, page, t.pb) : await fetchPage(jar, new URL(t.url, page.url).href); } catch (e) {}
+      if (page.html.includes(name)) break;
+    }
+  }
+  if (!page.html.includes(name)) throw new Error("Không về được trang có menu. " + brief(page.html) + (tried.length ? " Đã thử: " + tried.join(", ") : ""));
+  const res = await post(jar, page, PFX + name);
+  if (/Server Error in|Invalid postback|Runtime Error/i.test(res.html)) throw new Error("Trường báo lỗi: " + brief(res.html));
+  return res;
+}
 // Lấy chữ trong ô, kể cả giá trị của ô nhập, danh sách chọn, ô đánh dấu
 function cell($, td) {
   const c = $(td).clone();
@@ -147,10 +184,7 @@ app.get("/api/page", async (q, res) => {
   if (!name) return res.status(400).json({ error: "Mục không hợp lệ" });
   try {
     s.t = Date.now();
-    let html = await req(s.jar, BASE + "/");
-    if (!html.includes(name)) html = await postback(s.jar, html, PFX + "lnkHome");
-    if (!html.includes(name)) return res.status(502).json({ error: "Không tìm thấy mục trên trang trường" });
-    html = await postback(s.jar, html, PFX + name);
+    const html = (await openModule(s.jar, name)).html;
     if (m === "inbox") return res.json({ inbox: readInbox(cheerio.load(html)) });
     const urls = embedded(html), out = extract(cheerio.load(html)), dbg = { len: html.length, urls };
     for (const u of urls) {
@@ -160,8 +194,8 @@ app.get("/api/page", async (q, res) => {
     out.pairs = out.pairs.slice(0, 150); out.tables = out.tables.slice(0, 10); out.dbg = dbg;
     if (m === "me") { const n = findName(out.pairs); if (n) out.name = n; }
     res.json(out);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.code === 401 ? 401 : 500).json({ error: e.message }); }
 });
 
 if (require.main === module) app.listen(process.env.PORT || 3000, () => console.log("TDC Student đang chạy"));
-else module.exports = { extract, readInbox, findName, embedded };
+else module.exports = { extract, readInbox, findName, embedded, homeTargets, brief };

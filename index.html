@@ -148,22 +148,28 @@ function home(){
  return `<div class="note">${P.token?`Đã đăng nhập · đồng bộ lần cuối: ${P.last?new Date(P.last).toLocaleString("vi-VN"):"chưa có"}`:"Chưa đăng nhập cổng trường."} <button class="btn alt" style="padding:6px 12px;margin-left:6px" data-acc="1">${P.token?"Tài khoản":"Đăng nhập"}</button></div>
  <div class="grid">${M.map(m=>`<button class="tile" style="--h:${(M.indexOf(m)*47+200)%360}" data-go="${m.k}"><span>${m.i}</span>${m.n}<i>${m.k=="inbox"&&n?n+" chưa đọc":m.link?"Mở web":stat(m.k)}</i></button>`).join("")}</div>`}
 
-function nameFrom(pairs){const L=(pairs||[]).map(([l,v])=>[String(l).normalize("NFC").toLowerCase().trim(),v]);
- const f=L.find(([l])=>/(^|\s)(họ\s*(và\s*)?tên|tên sinh viên|họ tên sv)/.test(l));if(f)return f[1];
- const h=L.find(([l])=>/^họ(\s*(lót|đệm|và tên đệm))?$/.test(l)),t=L.find(([l])=>l=="tên");
- return h&&t?(h[1]+" "+t[1]).trim():(t?t[1]:"")}
-function autoName(){if(P.name&&P.name!=P.mssv)return;const s=(D.pages||{}).me;if(!s||!s.pairs)return;const n=nameFrom(s.pairs);if(n){P.name=n;PS()}}
+function nameFrom(pairs,mssv){const L=(pairs||[]).map(([l,v])=>[String(l).normalize("NFC").toLowerCase().trim(),String(v).trim()]);
+ const bad=/cha|mẹ|bố|má|người|giám hộ|phụ huynh|trường|lớp|ngành|khoa|hệ|môn|khóa|dân tộc|tôn giáo|quê|nơi|địa chỉ|email|điện thoại|liên hệ|chức|nghề/;
+ let f=L.find(([l])=>/^(họ\s*(và\s*)?tên(\s*(sinh viên|sv))?|tên\s*(sinh viên|sv)|sinh viên)$/.test(l));if(f)return f[1];
+ f=L.find(([l])=>/(họ\s*(và\s*)?tên|tên\s*(sinh viên|sv|đầy đủ))/.test(l)&&!bad.test(l));if(f)return f[1];
+ const h=L.find(([l])=>/^họ(\s*(lót|đệm|và tên đệm|và chữ lót))?$/.test(l)),t=L.find(([l])=>l=="tên");
+ if(h&&t)return(h[1]+" "+t[1]).trim();
+ const i=L.findIndex(([,v])=>mssv&&v.toLowerCase()==String(mssv).toLowerCase());
+ if(i>=0)for(const j of [i+1,i-1]){const c=L[j];if(c&&/(họ|tên)/.test(c[0])&&!bad.test(c[0]))return c[1]}
+ return t?t[1]:""}
+function autoName(){if(P.nameLock||(P.name&&P.name!=P.mssv))return;const s=(D.pages||{}).me;if(!s||!s.pairs)return;const n=nameFrom(s.pairs,P.mssv);if(n){P.name=n;PS()}}
 function cnt(k){const s=(D.pages||{})[k];if(!s||s.err)return(D[k]||[]).length;return(s.pairs||[]).length+(s.tables||[]).reduce((a,t)=>a+t.r.length,0)}
 function stat(k){const s=(D.pages||{})[k];if(!s)return(D[k]||[]).length?D[k].length+" mục":"Chưa đồng bộ";
  if(s.err)return"Lỗi · chạm để xem";const n=cnt(k);return n?n+" mục":(s.text?"Có nội dung":"Trống")}
 function snap(k){const s=(D.pages||{})[k];if(!s)return"";
  if(s.err)return`<div class="note">Mục này chưa đồng bộ được: ${esc(s.err)}</div>`;
- const kv=(s.pairs||[]).map(([l,v])=>`<div class="kv"><span>${esc(l)}</span><b>${esc(v)}</b></div>`).join("");
+ const kv=(s.pairs||[]).map(([l,v])=>`<div class="kv"${k=="me"?` data-nm="${esc(v)}"`:""}><span>${esc(l)}</span><b>${esc(v)}</b></div>`).join("");
  const tb=(s.tables||[]).map(t=>t.r.map(r=>`<div class="rw">${r.map((c,i)=>c?`<div class="cl">${t.h[i]?`<span>${esc(t.h[i])}</span>`:""}${esc(c)}</div>`:"").join("")}</div>`).join("")).join("");
  const prof=k=="me"&&P.name?`<div class="prof"><div class="pav">${esc(P.name.trim().split(" ").pop()[0].toUpperCase())}</div><div><b>${esc(P.name)}</b><span>MSSV ${esc(P.mssv)}</span></div></div>`:"";
+ const hint=k=="me"&&!P.name?`<div class="note">Chưa nhận ra họ tên. Chạm vào dòng họ tên của bạn bên dưới để dùng làm tên hiển thị.</div>`:"";
  const tx=s.text?(kv||tb?`<details class="f"><summary>Xem nội dung trang gốc</summary><div class="b">${esc(s.text)}</div></details>`:`<div class="card"><div class="b">${esc(s.text)}</div></div>`):"";
  const em=!kv&&!tb&&!s.text?`<div class="note">Trang trường không trả về nội dung cho mục này.${s.dbg?` (Trang ${s.dbg.len||0} ký tự, ${(s.dbg.urls||[]).length} trang nhúng)`:""}</div>`:"";
- return prof+(kv?`<div class="card">${kv}</div>`:"")+tb+tx+em+`<div class="stamp">Đồng bộ lúc ${new Date(s.t).toLocaleString("vi-VN")}</div>`}
+ return prof+hint+(kv?`<div class="card">${kv}</div>`:"")+tb+tx+em+`<div class="stamp">Đồng bộ lúc ${new Date(s.t).toLocaleString("vi-VN")}</div>`}
 function line(m,x){
  return m.f.filter(f=>!["t","b","p"].includes(f[0])&&x[f[0]]!==undefined&&x[f[0]]!=="").map(f=>f[2]=="num"&&f[0]=="a"?money(x[f[0]]):esc(x[f[0]])).join(" · ")}
 
@@ -213,6 +219,7 @@ function go(k){q="";editIdx=-1;scrollTo(0,0);
  render()}
 
 document.addEventListener("click",e=>{
+ const nmEl=e.target.closest("[data-nm]");if(nmEl&&cur=="me"){P.name=nmEl.dataset.nm;P.nameLock=1;PS();render();return}
  const t=e.target.closest("button,a");if(!t)return;
  if(t.id=="acc"||t.dataset.acc){sheet();return}
  if(t.dataset.sh){shAct(t.dataset.sh);return}
@@ -238,8 +245,9 @@ document.addEventListener("click",e=>{
 document.addEventListener("input",e=>{if(e.target.id=="q"){q=e.target.value;const p=e.target.selectionStart;render();const n=$("#q");n.focus();n.setSelectionRange(p,p)}});
 $("#theme").onclick=()=>{const r=document.documentElement,d=getComputedStyle(r).getPropertyValue("--bg").trim()=="#0e141b";r.dataset.theme=d?"light":"dark";try{localStorage.setItem("th",r.dataset.theme)}catch(e){}};
 try{const s=localStorage.getItem("th");if(s)document.documentElement.dataset.theme=s}catch(e){}
+function diag(){return`<details class="f"><summary>Chi tiết đồng bộ từng mục</summary><div class="b">${SYNC.map(k=>{const m=mod(k),s=k=="inbox"?(D.inboxV2?{}:null):(D.pages||{})[k];return esc(m.n)+": "+(!s?"chưa đồng bộ":s.err?"LỖI - "+s.err:"OK")}).join("\n")}</div></details>`}
 function sheet(){const o=P.token;
- $("#shc").innerHTML=`<h2>${o?"Tài khoản":"Đăng nhập cổng trường"}</h2>${o?`<div class="sum">${esc(P.name)}<br>MSSV: ${esc(P.mssv)}<br><small>Đồng bộ lần cuối: ${P.last?new Date(P.last).toLocaleString("vi-VN"):"chưa có"}</small></div><div class="btns"><button class="btn" data-sh="sync">Đồng bộ ngay</button><button class="btn del" data-sh="out">Đăng xuất</button></div>`:`<label>MSSV</label><input id="l_u" value="${esc(P.mssv)}" autocomplete="username" autocapitalize="characters" autocorrect="off" spellcheck="false"><label>Mật khẩu</label><input id="l_p" type="password" autocomplete="current-password"><label>Địa chỉ backend</label><input id="l_a" value="${esc(P.api)}" placeholder="Để trống nếu app chạy cùng máy chủ"><div class="btns"><button class="btn" data-sh="in">Đăng nhập và đồng bộ</button></div><div class="note">Mật khẩu chỉ gửi tới backend của bạn để đăng nhập, app không lưu mật khẩu.</div>`}<div class="btns"><button class="btn alt" data-sh="x">Đóng</button></div><div id="shm" class="note" hidden></div>`;
+ $("#shc").innerHTML=`<h2>${o?"Tài khoản":"Đăng nhập cổng trường"}</h2>${o?`<div class="sum">${esc(P.name)}<br>MSSV: ${esc(P.mssv)}<br><small>Đồng bộ lần cuối: ${P.last?new Date(P.last).toLocaleString("vi-VN"):"chưa có"}</small></div><div class="btns"><button class="btn" data-sh="sync">Đồng bộ ngay</button><button class="btn del" data-sh="out">Đăng xuất</button></div>${diag()}`:`<label>MSSV</label><input id="l_u" value="${esc(P.mssv)}" autocomplete="username" autocapitalize="characters" autocorrect="off" spellcheck="false"><label>Mật khẩu</label><input id="l_p" type="password" autocomplete="current-password"><label>Địa chỉ backend</label><input id="l_a" value="${esc(P.api)}" placeholder="Để trống nếu app chạy cùng máy chủ"><div class="btns"><button class="btn" data-sh="in">Đăng nhập và đồng bộ</button></div><div class="note">Mật khẩu chỉ gửi tới backend của bạn để đăng nhập, app không lưu mật khẩu.</div>`}<div class="btns"><button class="btn alt" data-sh="x">Đóng</button></div><div id="shm" class="note" hidden></div>`;
  $("#sh").hidden=false}
 const msg=t=>{const m=$("#shm");if(m){m.hidden=false;m.textContent=t}};
 async function api(p,o={}){const r=await fetch((P.api||"")+p,{...o,headers:{"Content-Type":"application/json",...(P.token?{Authorization:"Bearer "+P.token}:{})}});
@@ -252,7 +260,7 @@ async function sync(cb){D.pages=D.pages||{};
   try{const r=await api("/api/page?m="+k);
    if(k=="inbox"){const old=D.inbox||[],first=!D.inboxV2;
     D.inbox=[...(r.inbox||[]).map(x=>({...x,sy:1,u:(old.find(y=>y.sy&&y.t==x.t&&y.d==x.d)||{u:first?0:1}).u})),...old.filter(x=>!x.sy)];D.inboxV2=1}
-   else{D.pages[k]={t:Date.now(),pairs:r.pairs||[],tables:r.tables||[],text:r.text||"",dbg:r.dbg};if(k=="me"){const n=r.name||nameFrom(r.pairs);if(n){P.name=n;PS()}}}
+   else{D.pages[k]={t:Date.now(),pairs:r.pairs||[],tables:r.tables||[],text:r.text||"",dbg:r.dbg};if(k=="me"){const n=nameFrom(r.pairs,P.mssv)||r.name;if(n&&!P.nameLock){P.name=n;PS()}}}
   }catch(e){if(/hết hạn/.test(e.message))throw e;if(k!="inbox")D.pages[k]={t:Date.now(),err:e.message}}
   save()}
  P.last=Date.now();PS();save()}
