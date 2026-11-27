@@ -127,4 +127,32 @@ app.get("/api/login-page", async (req, res) => {
   res.json(out);
 });
 
+// Bấm link đăng nhập (postback) rồi liệt kê ô trong form. Không gửi mật khẩu.
+app.get("/api/login-form", async (req, res) => {
+  const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+  const out = {};
+  try {
+    const jar = {};
+    const cookies = r => { for (const c of r.headers.getSetCookie()) { const [kv] = c.split(";"), j = kv.indexOf("="); jar[kv.slice(0, j)] = kv.slice(j + 1); } };
+    const g = await fetch(BASE + "/", { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) });
+    cookies(g);
+    const $ = cheerio.load(await g.text());
+    const p = new URLSearchParams();
+    $("input[type=hidden]").each((_, e) => p.set($(e).attr("name"), $(e).attr("value") || ""));
+    p.set("__EVENTTARGET", "ctl00$lbtDangnhap"); p.set("__EVENTARGUMENT", "");
+    const post = await fetch(BASE + "/", { method: "POST", body: p.toString(), redirect: "manual",
+      headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", Cookie: Object.entries(jar).map(([k, v]) => k + "=" + v).join("; ") },
+      signal: AbortSignal.timeout(20000) });
+    out.postStatus = post.status; out.postLocation = post.headers.get("location");
+    const html = await post.text();
+    const $2 = cheerio.load(html);
+    out.hasLoginWord = /Tên đăng nhập|Mật mã/.test(html);
+    out.forms = $2("form").map((_, f) => ({
+      action: $2(f).attr("action") || "",
+      inputs: $2(f).find("input,select,textarea,button").map((_, e) => ($2(e).attr("name") || $2(e).attr("id") || "") + "|" + ($2(e).attr("type") || $2(e).prop("tagName"))).get().filter(Boolean)
+    })).get();
+  } catch (e) { out.error = e.message; }
+  res.json(out);
+});
+
 app.listen(process.env.PORT || 3000, () => console.log("TDC Mobile đang chạy"));
