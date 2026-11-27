@@ -70,4 +70,22 @@ app.get("/api/sync", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Kiểm tra kết nối tới trang trường (không dùng mật khẩu)
+app.get("/api/test", async (req, res) => {
+  const out = { target: BASE };
+  try {
+    const r = await fetch(BASE + "/", { redirect: "manual", headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(20000) });
+    out.status = r.status;
+    out.location = r.headers.get("location");
+    const html = await r.text();
+    const $ = cheerio.load(html);
+    out.title = $("title").text().trim();
+    out.inputs = $("input").map((_, e) => $(e).attr("name") || $(e).attr("id") || "").get().filter(Boolean);
+    out.buttons = $("input[type=submit],button").map((_, e) => $(e).attr("name") || $(e).text().trim()).get().filter(Boolean);
+  } catch (e) {
+    out.error = e.message + (e.cause ? " / " + (e.cause.code || e.cause.message) : "");
+  }
+  res.json(out);
+});
+
 app.listen(process.env.PORT || 3000, () => console.log("TDC Mobile đang chạy"));
