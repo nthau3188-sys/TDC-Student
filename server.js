@@ -109,4 +109,22 @@ app.get("/api/forms", async (req, res) => {
   res.json(out);
 });
 
+// Kiểm tra trang đăng nhập bằng User-Agent iPhone, không gửi mật khẩu
+app.get("/api/login-page", async (req, res) => {
+  const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+  const out = {};
+  try {
+    const r = await fetch(BASE + "/", { redirect: "manual", headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) });
+    out.status = r.status; out.location = r.headers.get("location");
+    const html = await r.text();
+    const $ = cheerio.load(html);
+    out.length = html.length;
+    out.links = $("a").map((_, a) => $(a).attr("href") || "").get().filter(h => /login|dang|nhap|sv/i.test(h)).slice(0, 30);
+    out.scripts = $("script").map((_, s) => ($(s).html() || "").slice(0, 300)).get().filter(s => /login|location|dang|nhap/i.test(s)).slice(0, 10);
+    out.iframes = $("iframe,frame").map((_, f) => $(f).attr("src") || "").get();
+    out.hasLoginWord = /Tên đăng nhập|Mật mã/.test(html);
+  } catch (e) { out.error = e.message; }
+  res.json(out);
+});
+
 app.listen(process.env.PORT || 3000, () => console.log("TDC Mobile đang chạy"));
